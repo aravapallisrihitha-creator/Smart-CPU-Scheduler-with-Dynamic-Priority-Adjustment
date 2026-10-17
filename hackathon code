@@ -1,0 +1,109 @@
+job->finish_ms);
+    }
+
+    fclose(report);
+
+    printf("\n================ RESULTS ================\n");
+    printf("Finished %d out of %d jobs.\n", completed, job_count);
+
+    if (completed > 0) {
+        printf("Average waiting time: %ld milliseconds.\n",
+               total_wait_ms / completed);
+    }
+
+    printf("A detailed report was saved in online_class_report.csv.\n");
+}
+
+int main(void)
+{
+    static const char *names[] = {
+        "Online class audio",
+        "Online class video",
+        "Teacher screen sharing",
+        "Student typing notes",
+        "Download class notes",
+        "Cloud file sync",
+        "Computer updates",
+        "File backup"
+    };
+
+    static const char *groups[] = {
+        "CLASS", "CLASS", "CLASS", "CLASS",
+        "BACKGROUND", "BACKGROUND", "BACKGROUND", "BACKGROUND"
+    };
+
+    static const int priorities[] = {10, 9, 8, 7, 3, 2, 1, 1};
+    static const int work_times[] = {900, 1100, 800, 650, 900, 1000, 800, 700};
+
+    signal(SIGINT, stop_program);
+    clock_gettime(CLOCK_MONOTONIC, &program_start);
+
+    jobs = calloc((size_t)job_count, sizeof(Job));
+
+    if (jobs == NULL) {
+        perror("Could not create jobs in memory");
+        return 1;
+    }
+
+    for (int i = 0; i < job_count; i++) {
+        jobs[i].number = i + 1;
+        jobs[i].name = names[i];
+        jobs[i].group = groups[i];
+        jobs[i].starting_priority = priorities[i];
+        jobs[i].work_ms = work_times[i];
+        jobs[i].state = WAITING;
+        jobs[i].start_ms = 0;
+    }
+
+    if (pipe(message_pipe) == -1) {
+        perror("Could not create the message pipe");
+        free(jobs);
+        return 1;
+    }
+
+    printf("============================================\n");
+    printf("       ONLINE CLASS LAG SAVER\n");
+    printf("============================================\n");
+    printf("Two helpers will work on computer jobs.\n");
+    printf("Class audio and video start with more points.\n");
+    printf("Waiting jobs gain %d points every second.\n", AGING_POINTS);
+    printf("Press Ctrl+C to ask the helpers to stop.\n");
+
+    pthread_t helpers[WORKER_COUNT];
+
+    for (long i = 0; i < WORKER_COUNT; i++) {
+        pthread_create(&helpers[i], NULL, computer_worker,
+                       (void *)(intptr_t)(i + 1));
+    }
+
+    for (int i = 0; i < WORKER_COUNT; i++) {
+        pthread_join(helpers[i], NULL);
+    }
+
+    close(message_pipe[1]);
+
+    int job_number;
+    int messages_received = 0;
+
+    while (read(message_pipe[0], &job_number, sizeof(job_number))
+           == sizeof(job_number)) {
+        messages_received++;
+    }
+
+    close(message_pipe[0]);
+
+    printf("\nThe helpers sent %d finished-job messages to the main program.\n",
+           messages_received);
+    printf("(They used a pipe, like passing notes.)\n");
+
+    if (stop_requested) {
+        printf("Stop request received. The helpers stopped safely.\n");
+    }
+
+    save_report();
+
+    free(jobs);
+    printf("Job memory has been cleaned up.\n");
+
+    return 0;
+}
